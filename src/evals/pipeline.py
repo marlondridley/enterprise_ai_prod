@@ -14,8 +14,6 @@ def run_deterministic_checks(case, answer_text: str) -> dict:
 
     return {'passed': True, 'reason': None}
 
-
-
 def run_eval_case(case, ai_client, judge):
     answer = ai_client.invoke(
         task_type='generation',
