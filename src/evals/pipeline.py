@@ -1,3 +1,21 @@
+def run_deterministic_checks(case, answer_text: str) -> dict:
+    if not answer_text or not answer_text.strip():
+        return {'passed': False, 'reason': 'Empty answer'}
+
+    required_keywords = getattr(case, 'required_keywords', None) or []
+    lowered = answer_text.lower()
+    for kw in required_keywords:
+        if kw.lower() not in lowered:
+            return {'passed': False, 'reason': f'Missing required keyword: {kw}'}
+
+    max_length = getattr(case, 'max_length', None)
+    if max_length and len(answer_text) > max_length:
+        return {'passed': False, 'reason': f'Answer exceeds max_length {max_length}'}
+
+    return {'passed': True, 'reason': None}
+
+
+
 def run_eval_case(case, ai_client, judge):
     answer = ai_client.invoke(
         task_type='generation',

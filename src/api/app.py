@@ -1,19 +1,23 @@
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from openai import APIError as OpenAIAPIError
 from openai import OpenAI
+from pydantic import BaseModel
 
 from src.platform_ai.client import AIClient
 from src.platform_ai.router import ModelRouter
 from src.platform_ai.settings import get_settings
 from src.prompts.registry import get_prompt
 from src.retrieval.fusion import AzureSearchRetriever, CosmosFactsRetriever, gather_context
-from src.tools.registry import TOOLS
 from src.safety.pipeline import SafetyPipeline
 from src.telemetry.tracing import configure_tracing, traced_invoke
+from src.tools.registry import TOOLS
+
+logger = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):
@@ -55,19 +59,30 @@ def health():
 
 
 @app.post('/api/chat')
-def chat(req: ChatRequest):
-    safety = app.state.safety
+def chat(req: ChatRequest, request: Request):
+    state = request.app.state
+    safety: SafetyPipeline = state.safety
+
     input_check = safety.check_input(req.user_text)
     if not input_check['allow']:
         raise HTTPException(status_code=400, detail=input_check['reason'])
 
-    system_prompt = get_prompt('chat', version='v1')
-    context = gather_context(
-        query=req.user_text,
-        user_context={'customer_id': req.customer_id},
-        ai_search_retriever=app.state.search_retriever,
-        cosmos_retriever=app.state.cosmos_retriever,
-    )
+    try:
+        system_prompt = get_prompt('chat', version='v1')
+    except FileNotFoundError as exc:
+        logger.error('Prompt file missing: %s', exc)
+        raise HTTPException(status_code=500, detail='System prompt not found') from exc
+
+    try:
+        context = gather_context(
+            query=req.user_text,
+            user_context={'customer_id': req.customer_id},
+            ai_search_retriever=state.search_retriever,
+            cosmos_retriever=state.cosmos_retriever,
+        )
+    except Exception as exc:
+        logger.error('Retrieval error: %s', exc)
+        context = {'documents': [], 'facts': []}
 
     input_items = [
         {
@@ -89,12 +104,16 @@ def chat(req: ChatRequest):
         },
     ]
 
-    result = traced_invoke(
-        ai_client=app.state.ai_client,
-        task_type='generation',
-        input_items=input_items,
-        tools=list(TOOLS.values()),
-    )
+    try:
+        result = traced_invoke(
+            ai_client=state.ai_client,
+            task_type='generation',
+            input_items=input_items,
+            tools=list(TOOLS.values()),
+        )
+    except OpenAIAPIError as exc:
+        logger.error('Azure OpenAI API error: %s', exc)
+        raise HTTPException(status_code=502, detail='Upstream model service error') from exc
 
     output_check = safety.check_output(result.text)
     if not output_check['allow']:
