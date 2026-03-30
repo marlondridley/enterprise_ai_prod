@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Enterprise AI Demo</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f5f7fb; }
+    .wrap { max-width: 900px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.08); overflow: hidden; }
+    .header { padding: 20px 24px; background: #111827; color: white; }
+    .chat { padding: 24px; min-height: 400px; }
+    .msg { margin-bottom: 16px; padding: 12px 14px; border-radius: 10px; white-space: pre-wrap; }
+    .user { background: #dbeafe; }
+    .bot { background: #eef2ff; }
+    .meta { font-size: 12px; color: #6b7280; margin-top: 6px; }
+    .composer { display: flex; gap: 12px; padding: 16px 24px 24px; }
+    textarea, input { width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; }
+    textarea { min-height: 100px; resize: vertical; }
+    button { padding: 12px 18px; border: 0; border-radius: 10px; background: #111827; color: white; cursor: pointer; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 24px 16px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <h1 style="margin:0 0 6px;">Enterprise AI Demo</h1>
+      <div>FastAPI + Azure OpenAI + Azure AI Search + Cosmos DB</div>
+    </div>
+    <div class="row">
+      <input id="userId" value="local-user" placeholder="User ID" />
+      <input id="customerId" value="customer-123" placeholder="Customer ID" />
+    </div>
+    <div id="chat" class="chat"></div>
+    <div class="composer">
+      <textarea id="prompt" placeholder="Ask a question..."></textarea>
+      <button id="send">Send</button>
+    </div>
+  </div>
+
+  <script>
+    const chat = document.getElementById('chat');
+    const sendBtn = document.getElementById('send');
+    const promptEl = document.getElementById('prompt');
+    const userIdEl = document.getElementById('userId');
+    const customerIdEl = document.getElementById('customerId');
+
+    function addMessage(kind, text, meta='') {
+      const div = document.createElement('div');
+      div.className = `msg ${kind}`;
+      div.textContent = text;
+      if (meta) {
+        const m = document.createElement('div');
+        m.className = 'meta';
+        m.textContent = meta;
+        div.appendChild(m);
+      }
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    sendBtn.addEventListener('click', async () => {
+      const user_text = promptEl.value.trim();
+      if (!user_text) return;
+      addMessage('user', user_text);
+      promptEl.value = '';
+
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            user_text,
+            user_id: userIdEl.value || 'local-user',
+            customer_id: customerIdEl.value || null,
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          addMessage('bot', `Error: ${data.detail || 'Request failed'}`);
+          return;
+        }
+
+        addMessage('bot', data.answer, `model=${data.model} • latency=${data.latency_ms}ms • tokens=${data.total_tokens}`);
+      } catch (err) {
+        addMessage('bot', `Error: ${err.message}`);
+      }
+    });
+  </script>
+</body>
+</html>

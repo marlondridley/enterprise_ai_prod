@@ -1,0 +1,9 @@
+routes:
+  judge:
+    model: gpt-4o-mini
+  extraction:
+    model: gpt-4o-mini
+    response_format: json_schema
+  high_risk_generation:
+    model: gpt-4o
+    moderation_required: true
