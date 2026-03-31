@@ -1,0 +1,32 @@
+name: chat_rag_rubric_v1
+description: Evaluation rubric for grounded enterprise assistant responses
+criteria:
+  - name: groundedness
+    description: Does the response rely only on the provided context?
+    min_score: 1
+    max_score: 5
+
+  - name: correctness
+    description: Is the response factually correct based on the provided context?
+    min_score: 1
+    max_score: 5
+
+  - name: completeness
+    description: Does the response fully answer the user's question?
+    min_score: 1
+    max_score: 5
+
+  - name: no_hallucination
+    description: Does the response avoid unsupported claims or fabricated details?
+    min_score: 1
+    max_score: 5
+
+  - name: instruction_following
+    description: Does the response follow the system prompt and task instructions?
+    min_score: 1
+    max_score: 5
+
+  - name: clarity
+    description: Is the response clear, concise, and easy to understand?
+    min_score: 1
+    max_score: 5

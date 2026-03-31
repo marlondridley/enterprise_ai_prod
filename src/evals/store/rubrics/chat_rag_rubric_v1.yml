@@ -1,0 +1,52 @@
+from src.evals.cases import load_all_eval_cases
+
+
+def run_deterministic_checks(case, answer_text: str) -> dict:
+    if not answer_text or not answer_text.strip():
+        return {"passed": False, "reason": "Empty answer"}
+
+    required_keywords = getattr(case, "required_keywords", None) or []
+    lowered = answer_text.lower()
+
+    for kw in required_keywords:
+        if kw.lower() not in lowered:
+            return {"passed": False, "reason": f"Missing required keyword: {kw}"}
+
+    max_length = getattr(case, "max_length", None)
+    if max_length and len(answer_text) > max_length:
+        return {"passed": False, "reason": f"Answer exceeds max_length {max_length}"}
+
+    return {"passed": True, "reason": None}
+
+
+def run_eval_case(case, ai_client, judge):
+    answer = ai_client.invoke(
+        task_type="generation",
+        input_items=case.input_items,
+        tools=case.tools,
+    )
+
+    deterministic = run_deterministic_checks(case, answer.text)
+
+    semantic = judge.score(
+        prompt=case.prompt,
+        response=answer.text,
+        rubric=case.rubric,
+    )
+
+    return {
+        "case_id": case.case_id,
+        "category": case.category,
+        "deterministic_pass": deterministic["passed"],
+        "deterministic_reason": deterministic["reason"],
+        "llm_score": semantic["score"],
+        "latency_ms": answer.latency_ms,
+        "total_tokens": answer.total_tokens,
+    }
+
+
+def run_all_eval_cases(ai_client, judge) -> list[dict]:
+    results = []
+    for case in load_all_eval_cases():
+        results.append(run_eval_case(case, ai_client, judge))
+    return results
