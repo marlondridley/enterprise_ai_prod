@@ -48,17 +48,25 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, float]:
         return {
             "avg_llm_score": 0.0,
             "deterministic_pass_rate": 0.0,
+            "llm_pass_rate": 0.0,
+            "critical_failure_rate": 0.0,
             "avg_latency_ms": 0.0,
             "avg_total_tokens": 0.0,
         }
 
     return {
-        "avg_llm_score": mean(r["llm_score"] for r in results),
+        "avg_llm_score": mean(float(r.get("llm_score", 0.0)) for r in results),
         "deterministic_pass_rate": mean(
-            1.0 if r["deterministic_pass"] else 0.0 for r in results
+            1.0 if r.get("deterministic_pass") else 0.0 for r in results
         ),
-        "avg_latency_ms": mean(r["latency_ms"] for r in results),
-        "avg_total_tokens": mean(r["total_tokens"] for r in results),
+        "llm_pass_rate": mean(
+            1.0 if r.get("llm_passed") else 0.0 for r in results
+        ),
+        "critical_failure_rate": mean(
+            1.0 if r.get("critical_failure") else 0.0 for r in results
+        ),
+        "avg_latency_ms": mean(float(r.get("latency_ms", 0.0)) for r in results),
+        "avg_total_tokens": mean(float(r.get("total_tokens", 0.0)) for r in results),
     }
 
 
@@ -70,6 +78,8 @@ def compare_to_baseline(
     max_pass_rate_drop: float = 0.05,
     max_latency_increase_pct: float = 0.25,
     max_token_increase_pct: float = 0.25,
+    max_llm_pass_rate_drop: float = 0.05,
+    max_critical_failure_rate_increase: float = 0.02,
 ) -> dict[str, Any]:
     current = summarize_results(current_results)
     baseline = summarize_results(baseline_results)
@@ -89,7 +99,23 @@ def compare_to_baseline(
             f"Deterministic pass rate regressed from {baseline['deterministic_pass_rate']:.2%} "
             f"to {current['deterministic_pass_rate']:.2%}"
         )
+    if current["llm_pass_rate"] < (
+        baseline["llm_pass_rate"] - max_llm_pass_rate_drop
+    ):
+        failures.append(
+            f"LLM pass rate regressed from {baseline['llm_pass_rate']:.2%} "
+            f"to {current['llm_pass_rate']:.2%}"
+        )
 
+    critical_failure_rate_increase = (
+        current["critical_failure_rate"] - baseline["critical_failure_rate"]
+    )
+    if critical_failure_rate_increase > max_critical_failure_rate_increase:
+        failures.append(
+            f"Critical failure rate increased from "
+            f"{baseline['critical_failure_rate']:.2%} "
+            f"to {current['critical_failure_rate']:.2%}"
+        )
     if baseline["avg_latency_ms"] > 0:
         latency_growth = (
             current["avg_latency_ms"] - baseline["avg_latency_ms"]
@@ -119,8 +145,8 @@ def compare_to_baseline(
 
 
 def fail_if_regressed(comparison: dict[str, Any]) -> None:
-    if comparison["passed"]:
+    if comparison.get("passed", False):
         return
 
-    message = "\n".join(comparison["failures"])
+    message = "\n".join(comparison.get("failures", []))
     raise RuntimeError(f"Regression gate failed:\n{message}")

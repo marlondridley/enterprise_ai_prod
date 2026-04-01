@@ -28,7 +28,7 @@ def run_eval_case(case, ai_client, judge, *, user_identifier: str | None = None)
     answer = ai_client.invoke(
         task_type="generation",
         input_items=case.input_items,
-        tools=getattr(case, "tools", None),
+        tools=case.tools,
     )
 
     # 2. Fast/Cheap Deterministic Checks
@@ -50,6 +50,10 @@ def run_eval_case(case, ai_client, judge, *, user_identifier: str | None = None)
         "deterministic_reason": deterministic["reason"],
         "llm_score": semantic["score"],
         "llm_passed": semantic["passed"],
+        "critical_failure": semantic.get("critical_failure", False),
+        "failed_criteria": semantic.get("failed_criteria", []),
+        "criterion_scores": semantic.get("criterion_scores", []),
+        "judge_summary": semantic.get("summary"),
         "llm_summary": semantic["summary"],
         "latency_ms": getattr(answer, "latency_ms", 0),
         "total_tokens": getattr(answer, "total_tokens", 0),

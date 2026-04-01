@@ -48,10 +48,17 @@ class LLMJudge:
             # 2. Safely parse output
             raw_text = getattr(response_obj, "output_text", "") or ""
             parsed = json.loads(raw_text)
+            criterion_scores = parsed.get("criterion_scores", [])
+
+            computed = compute_rubric_result(rubric, criterion_scores)
 
             return {
+                # "score": computed["score"], #means the score parsed from the model itself pass/fail instead of enforcing the rubric thresholds
+                #"passed": computed["passed"], #means the score parsed from the model itself pass/fail instead of enforcing the rubric thresholds
                 "score": float(parsed.get("score", 0.0)),
                 "passed": bool(parsed.get("passed", False)),
+                "critical_failure": computed["critical_failure"],
+                "failed_criteria": computed["failed_criteria"],
                 "summary": parsed.get("summary", "No summary provided."),
                 "criterion_scores": parsed.get("criterion_scores", []),
                 "raw": response_obj.model_dump() if hasattr(response_obj, "model_dump") else {},
@@ -105,58 +112,109 @@ class LLMJudge:
         }
 
     # --- HELPER METHODS ---
-
+    #score every criterion independently  fail if any critical criterion misses threshold do not use outside knowledge
     def _build_messages(self, prompt: str, rubric_text: str, response: str) -> list:
-        return [
-            {
-                "role": "system",
-                "content": [{
-                    "type": "input_text",
-                    "text": (
-                        "You are a strict evaluation judge for an enterprise AI system. "
-                        "Score the assistant response only against the supplied rubric. "
-                        "Do not use outside knowledge. Return only valid JSON that matches the schema."
-                    ),
-                }],
-            },
-            {
-                "role": "user",
-                "content": [{
-                    "type": "input_text",
-                    "text": (
-                        f"Judge Prompt:\n{prompt}\n\n"
-                        f"Rubric:\n{rubric_text}\n\n"
-                        f"Assistant Response To Evaluate:\n{response}"
-                    ),
-                }],
-            },
-        ]
+    return [
+        {
+            "role": "system",
+            "content": [{
+                "type": "input_text",
+                "text": (
+                    "You are a strict evaluation judge for an enterprise AI system.\n"
+                    "Evaluate the assistant response only against the supplied rubric and provided task.\n"
+                    "Do not use outside knowledge.\n"
+                    "Score every criterion independently.\n"
+                    "Provide a short reason for each criterion.\n"
+                    "Mark the evaluation as failed if any critical criterion fails its threshold.\n"
+                    "Return only valid JSON matching the schema."
+                ),
+            }],
+        },
+        {
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": (
+                    f"Judge Prompt:\n{prompt}\n\n"
+                    f"Rubric:\n{rubric_text}\n\n"
+                    f"Assistant Response To Evaluate:\n{response}"
+                ),
+            }],
+        },
+    ]
 
     def _build_schema(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "score": {"type": "number", "description": "Overall score from 1.0 to 5.0"},
-                "passed": {"type": "boolean", "description": "Whether the response passes the rubric overall"},
-                "summary": {"type": "string", "description": "Short explanation of the overall judgment"},
-                "criterion_scores": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "score": {"type": "number"},
-                            "reason": {"type": "string"},
-                        },
-                        "required": ["name", "score", "reason"],
-                        "additionalProperties": False,
+    return {
+        "type": "object",
+        "properties": {
+            "score": {"type": "number"},
+            "passed": {"type": "boolean"},
+            "critical_failure": {"type": "boolean"},
+            "summary": {"type": "string"},
+            "failed_criteria": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "criterion_scores": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "score": {"type": "number"},
+                        "reason": {"type": "string"},
                     },
+                    "required": ["name", "score", "reason"],
+                    "additionalProperties": False,
                 },
             },
-            "required": ["score", "passed", "summary", "criterion_scores"],
-            "additionalProperties": False,
-        }
+        },
+        "required": [
+            "score",
+            "passed",
+            "critical_failure",
+            "summary",
+            "failed_criteria",
+            "criterion_scores",
+        ],
+        "additionalProperties": False,
+    }
+    
+    #not fully trust the judge model’s own passed field. Let the judge return criterion scores, then compute the final gate in Python using your rubric thresholds
 
+    def compute_rubric_result(rubric: dict, criterion_scores: list[dict]) -> dict:
+        score_map = {item["name"]: item["score"] for item in criterion_scores}
+        failed_criteria = []
+        weighted_total = 0.0
+        total_weight = 0.0
+        critical_failure = False
+
+        for criterion in rubric.get("criteria", []):
+            name = criterion["name"]
+            weight = criterion.get("weight", 1.0)
+            threshold = criterion.get("pass_threshold", 3)
+            critical = criterion.get("critical", False)
+            score = score_map.get(name, 0)
+
+            weighted_total += score * weight
+            total_weight += weight
+
+            if score < threshold:
+                failed_criteria.append(name)
+                if critical:
+                    critical_failure = True
+
+        overall_score = weighted_total / total_weight if total_weight else 0.0
+        passed = (not critical_failure) and (overall_score >= rubric.get("passing_score", 3.5))
+
+        return {
+            "score": round(overall_score, 3),
+            "passed": passed,
+            "critical_failure": critical_failure,
+            "failed_criteria": failed_criteria,
+        }
+    
+    
     def _format_rubric(self, rubric: dict[str, Any]) -> str:
         lines = [
             f"Rubric Name: {rubric.get('name', 'unnamed')}",

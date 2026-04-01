@@ -1,52 +1,39 @@
-from src.evals.cases import load_all_eval_cases
-
-
-def run_deterministic_checks(case, answer_text: str) -> dict:
-    if not answer_text or not answer_text.strip():
-        return {"passed": False, "reason": "Empty answer"}
-
-    required_keywords = getattr(case, "required_keywords", None) or []
-    lowered = answer_text.lower()
-
-    for kw in required_keywords:
-        if kw.lower() not in lowered:
-            return {"passed": False, "reason": f"Missing required keyword: {kw}"}
-
-    max_length = getattr(case, "max_length", None)
-    if max_length and len(answer_text) > max_length:
-        return {"passed": False, "reason": f"Answer exceeds max_length {max_length}"}
-
-    return {"passed": True, "reason": None}
-
-
-def run_eval_case(case, ai_client, judge):
-    answer = ai_client.invoke(
-        task_type="generation",
-        input_items=case.input_items,
-        tools=case.tools,
-    )
-
-    deterministic = run_deterministic_checks(case, answer.text)
-
-    semantic = judge.score(
-        prompt=case.prompt,
-        response=answer.text,
-        rubric=case.rubric,
-    )
-
-    return {
-        "case_id": case.case_id,
-        "category": case.category,
-        "deterministic_pass": deterministic["passed"],
-        "deterministic_reason": deterministic["reason"],
-        "llm_score": semantic["score"],
-        "latency_ms": answer.latency_ms,
-        "total_tokens": answer.total_tokens,
-    }
-
-
-def run_all_eval_cases(ai_client, judge) -> list[dict]:
-    results = []
-    for case in load_all_eval_cases():
-        results.append(run_eval_case(case, ai_client, judge))
-    return results
+name: chat_rag_rubric_v1
+description: Production rubric for grounded enterprise assistant responses.
+passing_score: 3.8
+criteria:
+  - name: groundedness
+    description: Does the response rely only on the provided context and avoid unsupported claims?
+    min_score: 1
+    max_score: 5
+    weight: 0.30
+    pass_threshold: 4
+    critical: true
+  - name: answer_quality
+    description: Does the response directly answer the user's question and stay relevant to the request?
+    min_score: 1
+    max_score: 5
+    weight: 0.25
+    pass_threshold: 3
+    critical: false
+  - name: completeness
+    description: Does the response cover the important parts of the requested answer?
+    min_score: 1
+    max_score: 5
+    weight: 0.20
+    pass_threshold: 3
+    critical: false
+  - name: instruction_following
+    description: Does the response follow the system prompt and task-specific instructions?
+    min_score: 1
+    max_score: 5
+    weight: 0.15
+    pass_threshold: 4
+    critical: true
+  - name: clarity
+    description: Is the response clear, concise, and easy to understand?
+    min_score: 1
+    max_score: 5
+    weight: 0.10
+    pass_threshold: 3
+    critical: false
